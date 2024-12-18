@@ -8,6 +8,8 @@ import (
 	"os"
 )
 
+// check jira
+
 func main() {
 	flag.Parse()
 	if flag.NArg() != 1 {
