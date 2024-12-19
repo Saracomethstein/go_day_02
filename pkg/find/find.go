@@ -3,10 +3,10 @@ package find
 import (
 	"flag"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type Entries struct {
@@ -17,16 +17,12 @@ type Entries struct {
 }
 
 func Init(root string, settings Entries) {
-	ch := make(chan struct{}, 10)
-	defer close(ch)
+	var wg sync.WaitGroup
 
-	done := make(chan struct{})
-	go func() {
-		findRecursive(root, settings, ch)
-		close(done)
-	}()
+	wg.Add(1)
+	go findRecursive(root, &settings, &wg)
 
-	<-done
+	wg.Wait()
 }
 
 func ParseFlags() (Entries, string, error) {
@@ -62,18 +58,20 @@ func ParseFlags() (Entries, string, error) {
 	return entries, args[0], nil
 }
 
-func findRecursive(root string, settings Entries, ch chan struct{}) {
+func findRecursive(root string, settings *Entries, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		log.Printf("Failed to read directory %s: %v", root, err)
+		fmt.Printf("Error reading directory %s: %v\n", root, err)
 		return
 	}
 
 	for _, entry := range entries {
 		path := filepath.Join(root, entry.Name())
-		info, err := entry.Info()
+		info, err := os.Lstat(path)
 		if err != nil {
-			log.Printf("Failed to get info for %s: %v", path, err)
+			fmt.Printf("Error accessing %s: %v\n", path, err)
 			continue
 		}
 
@@ -82,12 +80,9 @@ func findRecursive(root string, settings Entries, ch chan struct{}) {
 				fmt.Println(path)
 			}
 
-			ch <- struct{}{}
-			go func(subDir string) {
-				defer func() { <-ch }()
-				findRecursive(subDir, settings, ch)
-			}(path)
-		} else if settings.Link && (info.Mode()&os.ModeSymlink != 0) {
+			wg.Add(1)
+			go findRecursive(path, settings, wg)
+		} else if info.Mode()&os.ModeSymlink != 0 && settings.Link {
 			processSymlink(path)
 		} else if settings.File && matchesExtension(path, settings.Ext) {
 			fmt.Println(path)
@@ -98,7 +93,7 @@ func findRecursive(root string, settings Entries, ch chan struct{}) {
 func processSymlink(path string) {
 	target, err := os.Readlink(path)
 	if err != nil {
-		log.Printf("Failed to read symlink %s: %v", path, err)
+		fmt.Printf("Error reading symlink %s: %v\n", path, err)
 		return
 	}
 
@@ -107,7 +102,7 @@ func processSymlink(path string) {
 	} else if os.IsNotExist(err) {
 		fmt.Printf("%s -> [broken]\n", path)
 	} else {
-		log.Printf("Failed to stat target %s: %v", target, err)
+		fmt.Printf("Error resolving symlink %s: %v\n", path, err)
 	}
 }
 
