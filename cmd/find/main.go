@@ -7,9 +7,9 @@ import (
 )
 
 func main() {
-	ent, directory, err := find.FlagParse()
+	ent, directory, err := find.ParseFlags()
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 	}
-	find.Init(directory, &ent)
+	find.Init(directory, ent)
 }

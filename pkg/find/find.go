@@ -3,9 +3,10 @@ package find
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"sync"
+	"strings"
 )
 
 type Entries struct {
@@ -15,16 +16,20 @@ type Entries struct {
 	Ext  string
 }
 
-func Init(root string, ent *Entries) {
-	var wg sync.WaitGroup
+func Init(root string, settings Entries) {
+	ch := make(chan struct{}, 10)
+	defer close(ch)
 
-	wg.Add(1)
-	go find(root, ent, &wg)
+	done := make(chan struct{})
+	go func() {
+		findRecursive(root, settings, ch)
+		close(done)
+	}()
 
-	wg.Wait()
+	<-done
 }
 
-func FlagParse() (Entries, string, error) {
+func ParseFlags() (Entries, string, error) {
 	symlinkFlag := flag.Bool("sl", false, "output symlinks")
 	dirFlag := flag.Bool("d", false, "output dirs")
 	fileFlag := flag.Bool("f", false, "output files")
@@ -32,72 +37,80 @@ func FlagParse() (Entries, string, error) {
 	flag.Parse()
 
 	args := flag.Args()
-	if len(args) < 1 || (*extFlag != "" && !(*fileFlag)) {
-		return Entries{}, "", fmt.Errorf("Usage: ./find <flags: -sl | -d | -f | -ext (reqiered f)> <directory>")
+	if len(args) < 1 {
+		return Entries{}, "", fmt.Errorf("Usage: ./find [flags] <directory>")
+	}
+	if *extFlag != "" && !*fileFlag {
+		return Entries{}, "", fmt.Errorf("-ext flag requires -f flag")
 	}
 
-	directory := args[0]
-	var ent Entries
-	if !(*symlinkFlag) && !(*dirFlag) && !(*fileFlag) {
-		ent = Entries{
+	entries := Entries{
+		Link: *symlinkFlag,
+		Dir:  *dirFlag,
+		File: *fileFlag,
+		Ext:  strings.TrimPrefix(*extFlag, "."),
+	}
+
+	if !*symlinkFlag && !*dirFlag && !*fileFlag {
+		entries = Entries{
+			Link: true,
 			Dir:  true,
 			File: true,
-			Link: true,
-			Ext:  "",
-		}
-	} else {
-		ent = Entries{
-			Dir:  *dirFlag,
-			File: *fileFlag,
-			Link: *symlinkFlag,
-			Ext:  *extFlag,
 		}
 	}
-	return ent, directory, nil
+
+	return entries, args[0], nil
 }
 
-func find(root string, ent *Entries, wg *sync.WaitGroup) {
-	defer wg.Done()
-
+func findRecursive(root string, settings Entries, ch chan struct{}) {
 	entries, err := os.ReadDir(root)
-
 	if err != nil {
+		log.Printf("Failed to read directory %s: %v", root, err)
 		return
 	}
 
 	for _, entry := range entries {
 		path := filepath.Join(root, entry.Name())
-		info, err := os.Lstat(path)
-
+		info, err := entry.Info()
 		if err != nil {
+			log.Printf("Failed to get info for %s: %v", path, err)
 			continue
 		}
 
 		if info.IsDir() {
-			if ent.Dir {
+			if settings.Dir {
 				fmt.Println(path)
 			}
-			wg.Add(1)
-			go find(path, ent, wg)
-		} else if info.Mode()&os.ModeSymlink != 0 && ent.Link {
-			target, err := os.Readlink(path)
 
-			if err != nil {
-				continue
-			}
-
-			if _, err := os.Stat(target); err == nil {
-				fmt.Println(path, " -> ", target)
-			} else if os.IsNotExist(err) {
-				fmt.Println(path, " -> ", " [broken] ")
-			} else {
-				continue
-			}
-		} else {
-			if ent.File && (ent.Ext == "" || ent.Ext != "" && ("."+ent.Ext) == filepath.Ext(path)) {
-				fmt.Println(path)
-				continue
-			}
+			ch <- struct{}{}
+			go func(subDir string) {
+				defer func() { <-ch }()
+				findRecursive(subDir, settings, ch)
+			}(path)
+		} else if settings.Link && (info.Mode()&os.ModeSymlink != 0) {
+			processSymlink(path)
+		} else if settings.File && matchesExtension(path, settings.Ext) {
+			fmt.Println(path)
 		}
 	}
+}
+
+func processSymlink(path string) {
+	target, err := os.Readlink(path)
+	if err != nil {
+		log.Printf("Failed to read symlink %s: %v", path, err)
+		return
+	}
+
+	if _, err := os.Stat(target); err == nil {
+		fmt.Printf("%s -> %s\n", path, target)
+	} else if os.IsNotExist(err) {
+		fmt.Printf("%s -> [broken]\n", path)
+	} else {
+		log.Printf("Failed to stat target %s: %v", target, err)
+	}
+}
+
+func matchesExtension(path, ext string) bool {
+	return ext == "" || strings.EqualFold(filepath.Ext(path), "."+ext)
 }
