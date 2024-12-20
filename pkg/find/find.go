@@ -97,7 +97,8 @@ func processSymlink(path string) {
 		return
 	}
 
-	if _, err := os.Stat(target); err == nil {
+	absoluteTarget := filepath.Join(filepath.Dir(path), target)
+	if _, err := os.Stat(absoluteTarget); err == nil {
 		fmt.Printf("%s -> %s\n", path, target)
 	} else if os.IsNotExist(err) {
 		fmt.Printf("%s -> [broken]\n", path)
