@@ -15,6 +15,13 @@ type WCSettings struct {
 	Words  bool
 }
 
+type WCInfo struct {
+	cLine   int
+	cSymbol int
+	cWord   int
+	File    string
+}
+
 func Init(files []string, settings WCSettings) {
 	var wg sync.WaitGroup
 
@@ -54,33 +61,43 @@ func FlagParce() (WCSettings, []string, error) {
 	return settings, args[0:], nil
 }
 
-func wcRecursive(file string, settings WCSettings, wg *sync.WaitGroup) {
+func wcRecursive(filename string, settings WCSettings, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	f, err := os.Open(file)
+	file, err := os.Open(filename)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 		return
 	}
-	defer f.Close()
+	defer file.Close()
 
-	var cLine, cSymbol, cWord int
+	info := WCInfo{
+		File: filename,
+	}
+	err = getCounts(file, &info)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Erorr: %s\n", err)
+		return
+	}
+	printCounts(settings, info)
+}
+
+func getCounts(file *os.File, info *WCInfo) error {
 	inWord := false
-
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(file)
 	scanner.Split(bufio.ScanRunes)
 
 	for scanner.Scan() {
 		char := scanner.Text()
-		cSymbol++
+		info.cSymbol++
 
 		if char == "\n" {
-			cLine++
+			info.cLine++
 		}
 
 		if unicode.IsSpace(rune(char[0])) {
 			if inWord {
-				cWord++
+				info.cWord++
 				inWord = false
 			}
 		} else {
@@ -89,22 +106,23 @@ func wcRecursive(file string, settings WCSettings, wg *sync.WaitGroup) {
 	}
 
 	if inWord {
-		cWord++
+		info.cWord++
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		return
+		return err
 	}
+	return nil
+}
 
+func printCounts(settings WCSettings, info WCInfo) {
 	var output string
 	if settings.Line {
-		output += fmt.Sprintf("%d", cLine)
+		output += fmt.Sprintf("%d", info.cLine)
 	} else if settings.Symbol {
-		output += fmt.Sprintf("%d", cSymbol)
+		output += fmt.Sprintf("%d", info.cSymbol)
 	} else if settings.Words {
-		output += fmt.Sprintf("%d", cWord)
+		output += fmt.Sprintf("%d", info.cWord)
 	}
-
-	fmt.Println(output, "\t", file)
+	fmt.Println(output, "\t", info.File)
 }
