@@ -124,5 +124,5 @@ func printCounts(settings WCSettings, info WCInfo) {
 	} else if settings.Words {
 		output += fmt.Sprintf("%d", info.cWord)
 	}
-	fmt.Println(output, "\t", info.File)
+	fmt.Println(output, info.File)
 }

@@ -12,14 +12,18 @@ build: generate_build_dir
 	@go build -o $(FIND_APP) cmd/find/main.go
 	@go build -o $(WC_APP) cmd/wc/main.go
 
-test: generate_dir
+test: generate_test_dir build
+	@echo "Run tests for FIND"
 	@go test -v ./pkg/find
+	@echo "Run tests for WC"
+	@go test -v ./pkg/wc
+	@rm -rf $(TEST_DIR)
 
 generate_build_dir:
 	@mkdir $(BUILD_DIR)
 
 generate_test_dir:
-	@sh tests/init_test_dir.sh
+	@sh tests/scripts/init_test_dir.sh
 
 clean:
 	@rm -rf $(TEST_DIR)
