@@ -1,0 +1,3 @@
+package xargs
+
+func Init() {}
